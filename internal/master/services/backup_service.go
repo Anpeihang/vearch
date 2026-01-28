@@ -36,9 +36,25 @@ import (
 	json "github.com/vearch/vearch/v3/internal/pkg/vjson"
 )
 
+// Type aliases to maintain original usage without entity prefix
+type (
+	BackupVersion                = entity.BackupVersion
+	BackupVersionStatus          = entity.BackupVersionStatus
+	BackupTaskStatus             = entity.BackupTaskStatus
+	PartitionBackupInfo          = entity.PartitionBackupInfo
+	PartitionBackupOrRestoreTask = entity.PartitionBackupOrRestoreTask
+	VersionInfo                  = entity.VersionInfo
+	VersionStatusInfo            = entity.VersionStatusInfo
+	CreateVersionRequest         = entity.CreateVersionRequest
+)
+
 type BackupService struct {
 	client        *client.Client
 	backupManager *BackupManager
+}
+
+func buildSpaceKey(dbName, spaceName string) string {
+	return fmt.Sprintf("%s-%s", dbName, spaceName)
 }
 
 func NewBackupService(client *client.Client) *BackupService {
@@ -59,7 +75,7 @@ func (s *BackupService) Start() {
 // GetBackupProgress gets the backup progress for the specified space
 func (s *BackupService) GetBackupProgress(ctx context.Context, dbName, spaceName, versionID string) (*entity.BackupProgressResponse, error) {
 	// Construct spaceKey in format: dbName-spaceName
-	spaceKey := fmt.Sprintf("%s-%s", dbName, spaceName)
+	spaceKey := buildSpaceKey(dbName, spaceName)
 
 	if s.backupManager == nil || s.backupManager.backupMonitor == nil {
 		return nil, fmt.Errorf("backup service not initialized")
@@ -73,12 +89,12 @@ func (s *BackupService) GetBackupProgress(ctx context.Context, dbName, spaceName
 		switch versionInfo.Status {
 		case VersionStatusCompleted:
 			return &entity.BackupProgressResponse{
-				Status:    "completed",
+				Status:    BackupStatusStringCompleted,
 				VersionID: versionID,
 			}, nil
 		case VersionStatusFailed:
 			return &entity.BackupProgressResponse{
-				Status:    "failed",
+				Status:    BackupStatusStringFailed,
 				VersionID: versionID,
 			}, nil
 		}
@@ -94,12 +110,12 @@ func (s *BackupService) GetBackupProgress(ctx context.Context, dbName, spaceName
 			switch versionInfo.Status {
 			case VersionStatusCompleted:
 				return &entity.BackupProgressResponse{
-					Status:    "completed",
+					Status:    BackupStatusStringCompleted,
 					VersionID: versionID,
 				}, nil
 			case VersionStatusFailed:
 				return &entity.BackupProgressResponse{
-					Status:    "failed",
+					Status:    BackupStatusStringFailed,
 					VersionID: versionID,
 				}, nil
 			}
@@ -107,7 +123,7 @@ func (s *BackupService) GetBackupProgress(ctx context.Context, dbName, spaceName
 	}
 
 	if progress.TotalTasks > 0 {
-		progress.Status = "running"
+		progress.Status = BackupStatusStringRunning
 		progress.VersionID = versionID
 	}
 
@@ -116,7 +132,7 @@ func (s *BackupService) GetBackupProgress(ctx context.Context, dbName, spaceName
 
 // GetRestoreProgress gets the restore progress for the specified space
 func (s *BackupService) GetRestoreProgress(ctx context.Context, dbName, spaceName string) (*entity.BackupProgressResponse, error) {
-	spaceKey := fmt.Sprintf("%s-%s", dbName, spaceName)
+	spaceKey := buildSpaceKey(dbName, spaceName)
 
 	if s.backupManager == nil || s.backupManager.backupMonitor == nil {
 		return nil, fmt.Errorf("backup service not initialized")
@@ -127,7 +143,7 @@ func (s *BackupService) GetRestoreProgress(ctx context.Context, dbName, spaceNam
 	var versionID string
 	if exists {
 		for _, task := range tasks {
-			if task.TaskType == "restore" && task.BackupRequest != nil {
+			if task.TaskType == BackupTaskTypeRestore && task.BackupRequest != nil {
 				versionID = task.BackupRequest.VersionID
 				break
 			}
@@ -195,7 +211,7 @@ func (s *BackupService) GetRestoreProgress(ctx context.Context, dbName, spaceNam
 // DeleteBackupVersion deletes a backup version
 func (s *BackupService) DeleteBackupVersion(ctx context.Context, dbName, spaceName, versionID string, backup *entity.BackupSpaceRequest) error {
 	// Construct spaceKey in format: dbName-spaceName
-	spaceKey := fmt.Sprintf("%s-%s", dbName, spaceName)
+	spaceKey := buildSpaceKey(dbName, spaceName)
 
 	mc := s.client.Master()
 
@@ -323,9 +339,9 @@ func (s *BackupService) backupSchema(ctx context.Context, dbName, spaceName stri
 	bucketName := backup.S3Param.BucketName
 
 	var objectName string
-	if backup.Command == "create" {
+	if backup.Command == BackupCommandCreate {
 		objectName = filepath.Join(config.Conf().Global.Name, "backup", dbName, space.Name, fmt.Sprintf("%d/%s.schema", backup.BackupID, space.Name))
-	} else if backup.Command == "export" {
+	} else if backup.Command == BackupCommandExport {
 		// res.BackupID is timestamp
 		res.BackupID = int(time.Now().Unix())
 		backup.BackupID = res.BackupID
@@ -354,7 +370,7 @@ func (s *BackupService) restoreSchema(ctx context.Context, dbService *DBService,
 
 	_, err = mc.QuerySpaceByName(ctx, dbID, spaceName)
 	if err == nil {
-		err = fmt.Errorf("space duplicate")
+		err = fmt.Errorf("space duplicate: space %s already exists in database %s", spaceName, dbName)
 		return res, err
 	}
 	minioClient, err := minio.New(backup.S3Param.EndPoint, &minio.Options{
@@ -511,12 +527,12 @@ func (s *BackupService) BackupSpace(ctx context.Context, dbService *DBService, s
 		return nil, err
 	}
 
-	if req.Command == "list" {
+	if req.Command == BackupCommandList {
 		res.BackupIDs = list(ctx, req, minioClient, dbName, spaceName)
 		return res, nil
 	}
 
-	if req.Command == "create" {
+	if req.Command == BackupCommandCreate {
 		path := filepath.Join(config.Conf().Global.Name, "backup", dbName, spaceName)
 		objectCh := minioClient.ListObjects(ctx, req.S3Param.BucketName, minio.ListObjectsOptions{
 			Prefix: path,
@@ -540,13 +556,13 @@ func (s *BackupService) BackupSpace(ctx context.Context, dbService *DBService, s
 		}
 		req.BackupID = int(backupID)
 	}
-	if req.Command == "create" || req.Command == "export" {
+	if req.Command == BackupCommandCreate || req.Command == BackupCommandExport {
 		res, err = s.backupSchema(ctx, dbName, spaceName, req)
 		if err != nil {
 			log.Error(err)
 			return nil, err
 		}
-	} else if req.Command == "restore" {
+	} else if req.Command == BackupCommandRestore {
 		res, err = s.restoreSchema(ctx, dbService, spaceService, configService, dbName, spaceName, req)
 		if err != nil {
 			log.Error(err)
@@ -571,7 +587,7 @@ func (s *BackupService) BackupSpace(ctx context.Context, dbService *DBService, s
 
 	// invoke all space nodeID
 	s3PartitionMap := make(map[entity.PartitionID]entity.PartitionID, 0)
-	if req.Command == "restore" {
+	if req.Command == BackupCommandRestore {
 		s3Path := filepath.Join(config.Conf().Global.Name, "backup", dbName, spaceName, fmt.Sprintf("%d", req.BackupID))
 		objectCh := minioClient.ListObjects(ctx, req.S3Param.BucketName, minio.ListObjectsOptions{
 			Prefix:    s3Path + "/",
@@ -599,7 +615,7 @@ func (s *BackupService) BackupSpace(ctx context.Context, dbService *DBService, s
 				p = space.Partitions[i]
 			}
 		}
-	} else if req.Command == "create" || req.Command == "export" {
+	} else if req.Command == BackupCommandCreate || req.Command == BackupCommandExport {
 		remoteBasePid := entity.PartitionID(math.MaxUint32)
 		for _, p := range space.Partitions {
 			partition, err := mc.QueryPartition(ctx, p.Id)
@@ -654,7 +670,7 @@ func (s *BackupService) BackupSpace(ctx context.Context, dbService *DBService, s
 		} else {
 			for _, nodeID := range partition.Replicas {
 				log.Debug("nodeID is [%+v], partition is [%+v], [%+v]", nodeID, partition.Id, partition.LeaderID)
-				if nodeID != partition.LeaderID && req.Command != "restore" {
+				if nodeID != partition.LeaderID && req.Command != BackupCommandRestore {
 					continue
 				}
 				server, err := mc.QueryServer(ctx, nodeID)
@@ -712,7 +728,7 @@ func (s *BackupService) SpaceSnapshot(ctx context.Context, dbService *DBService,
 		},
 	}
 
-	if req.Command == "backup" {
+	if req.Command == BackupCommandBackup {
 		backupVersion, err := backupManager.createSnapshot(ctx, snapshotReq)
 		if err != nil {
 			log.Error("createSnapshot failed: %v", err)
@@ -728,7 +744,7 @@ func (s *BackupService) SpaceSnapshot(ctx context.Context, dbService *DBService,
 			dbName, spaceName, backupVersion.VersionID, backupVersion.BackupID)
 		return res, nil
 
-	} else if req.Command == "restore" {
+	} else if req.Command == BackupCommandRestore {
 		if req.SourceClusterName != "" {
 			if req.VersionID == "" && req.BackupID == 0 {
 				return nil, fmt.Errorf("when source_cluster_name is specified, either version_id or backup_id must be provided")
@@ -782,21 +798,6 @@ func (vm *VersionManager) Start() error {
 	return nil
 }
 
-// VersionInfo stores multiple BackupVersions for each space_key
-type VersionInfo struct {
-	SpaceKey    string           `json:"space_key"`
-	Versions    []*BackupVersion `json:"versions"`
-	LastUpdated time.Time        `json:"last_updated"`
-	TotalCount  int64            `json:"total_size"`
-}
-
-// VersionStatusInfo stores the status of each versionId (for BackupManager's versionCache)
-type VersionStatusInfo struct {
-	VersionID   string              `json:"version_id"`
-	Status      BackupVersionStatus `json:"status"`
-	LastUpdated time.Time           `json:"last_updated"`
-}
-
 func (vm *VersionManager) getOrCreateVersionInfo(spaceKey string) *VersionInfo {
 	versionInfo, ok := vm.versionCache[spaceKey]
 	if !ok {
@@ -811,22 +812,7 @@ func (vm *VersionManager) getOrCreateVersionInfo(spaceKey string) *VersionInfo {
 	return versionInfo
 }
 
-// BackupVersion backup version
-type BackupVersion struct {
-	SpaceKey    string                 `json:"space_key"`   // dbName-spaceName
-	VersionID   string                 `json:"version_id"`  // version ID
-	BackupID    string                 `json:"backup_id"`   // backup ID
-	CreateTime  time.Time              `json:"create_time"` // creation time
-	Size        int64                  `json:"size"`        // version size
-	Status      BackupVersionStatus    `json:"status"`      // version status, complete status flow
-	Description string                 `json:"description"` // version description
-	Checksum    string                 `json:"checksum"`    // checksum
-	Partitions  []*PartitionBackupInfo `json:"partitions"`  // partition backup information
-}
-
-// BackupVersionStatus version status
-type BackupVersionStatus int
-
+// BackupVersionStatus constants
 const (
 	VersionStatusInited BackupVersionStatus = iota
 	VersionStatusRunning
@@ -836,14 +822,14 @@ const (
 	VersionStatusCompleted
 )
 
+// PS snapshot status constants
 const (
 	PSSnapshotStatusRunning   int = iota // 0
 	PSSnapshotStatusCompleted            // 1
 	PSSnapshotStatusFailed               // 2
 )
 
-type BackupTaskStatus int
-
+// BackupTaskStatus constants
 const (
 	BackupStatusInited BackupTaskStatus = iota
 	BackupStatusRunning
@@ -851,19 +837,38 @@ const (
 	BackupStatusFailed
 )
 
-type PartitionBackupInfo struct {
-	PartitionID   entity.PartitionID `json:"partition_id"`
-	NodeID        entity.NodeID      `json:"node_id"`
-	S3PartitionID entity.PartitionID `json:"s3_partition_id"`
-	Size          int64              `json:"size"`
-	Checksum      string             `json:"checksum"`
-	S3Path        string             `json:"s3_path"`
-	Status        string             `json:"status"` // BackupStatusRunning  BackupStatusCompleted  BackupStatusFailed
-}
+// Backup command constants
+const (
+	BackupCommandBackup  = "backup"
+	BackupCommandRestore = "restore"
+	BackupCommandCreate  = "create"
+	BackupCommandExport  = "export"
+	BackupCommandList    = "list"
+)
+
+// Backup task type constants
+const (
+	BackupTaskTypeBackup  = "backup"
+	BackupTaskTypeRestore = "restore"
+)
+
+// Backup status string constants
+const (
+	BackupStatusStringCompleted = "completed"
+	BackupStatusStringFailed    = "failed"
+	BackupStatusStringRunning   = "running"
+	BackupStatusStringNotFound  = "not_found"
+)
+
+// Backup description constants
+const (
+	BackupDescriptionBackup  = "backup"
+	BackupDescriptionRestore = "restore"
+)
 
 // CreateVersion creates a new version
 func (vm *VersionManager) CreateVersion(ctx context.Context, req *CreateVersionRequest) (*BackupVersion, error) {
-	spaceKey := fmt.Sprintf("%s-%s", req.DBName, req.SpaceName)
+	spaceKey := buildSpaceKey(req.DBName, req.SpaceName)
 
 	// Create version object
 	version := &BackupVersion{
@@ -891,7 +896,7 @@ func (vm *VersionManager) CreateVersion(ctx context.Context, req *CreateVersionR
 }
 
 func (vm *VersionManager) RestoreVersion(ctx context.Context, req *CreateVersionRequest) (*BackupVersion, error) {
-	spaceKey := fmt.Sprintf("%s-%s", req.DBName, req.SpaceName)
+	spaceKey := buildSpaceKey(req.DBName, req.SpaceName)
 
 	// Create version object
 	version := &BackupVersion{
@@ -900,7 +905,7 @@ func (vm *VersionManager) RestoreVersion(ctx context.Context, req *CreateVersion
 		BackupID:    req.BackupID,
 		CreateTime:  time.Now(),
 		Status:      VersionStatusInited,
-		Description: "restore",
+		Description: BackupDescriptionRestore,
 		Partitions:  req.Partitions,
 	}
 	log.Info("restore version %s for space %s", req.VersionID, spaceKey)
@@ -917,18 +922,6 @@ func (vm *VersionManager) RestoreVersion(ctx context.Context, req *CreateVersion
 
 	log.Info("Created new version %s for space %s", req.VersionID, spaceKey)
 	return version, nil
-}
-
-// CreateVersionRequest create version request
-type CreateVersionRequest struct {
-	ClusterName string                 `json:"cluster_name"`
-	DBName      string                 `json:"db_name"`
-	SpaceName   string                 `json:"space_name"`
-	BackupID    string                 `json:"backup_id"`
-	VersionID   string                 `json:"version_id"`
-	Description string                 `json:"description"`
-	Tags        map[string]string      `json:"tags"`
-	Partitions  []*PartitionBackupInfo `json:"partitions"`
 }
 
 func (vm *VersionManager) generateVersionID() string {
@@ -959,23 +952,6 @@ func (bm *BackupMonitor) markTaskFailed(task *PartitionBackupOrRestoreTask, err 
 			task.LastErrorMsg = err.Error()
 		}
 	}
-}
-
-// PartitionBackupOrRestoreTask partition backup/restore task
-type PartitionBackupOrRestoreTask struct {
-	PartitionID   entity.PartitionID             `json:"partition_id"`
-	NodeID        entity.NodeID                  `json:"node_id"`
-	VersionID     string                         `json:"version_id"`
-	PSNodeAddr    string                         `json:"ps_node_addr"`
-	TaskType      string                         `json:"task_type"` // task type: backup, restore
-	Status        BackupTaskStatus               `json:"status"`
-	RetryCount    int                            `json:"retry_count"`
-	MaxRetries    int                            `json:"max_retries"`
-	LastError     error                          `json:"-"`
-	LastErrorMsg  string                         `json:"last_error,omitempty"`
-	StartTime     time.Time                      `json:"start_time"`
-	CompleteTime  time.Time                      `json:"complete_time"`
-	BackupRequest *entity.BackupOrRestoreRequest `json:"backup_request,omitempty"`
 }
 
 // ============================================================================
@@ -1237,7 +1213,7 @@ func (bm *BackupMonitor) checkRestoreTasks() {
 		var restoreVersionID string
 
 		for _, task := range tasks {
-			if task.TaskType != "restore" {
+			if task.TaskType != BackupTaskTypeRestore {
 				continue
 			}
 
@@ -1354,7 +1330,7 @@ func (bm *BackupMonitor) checkRestoreTasks() {
 			if tasks, exists := bm.tasks[info.spaceKey]; exists {
 				allRestore := true
 				for _, task := range tasks {
-					if task.TaskType != "restore" {
+					if task.TaskType != BackupTaskTypeRestore {
 						allRestore = false
 						break
 					}
@@ -1443,7 +1419,7 @@ func (bm *BackupMonitor) addRestoreTasks(ctx context.Context, spaceKey string, p
 				PartitionID:   partition.PartitionID,
 				NodeID:        partition.NodeID,
 				PSNodeAddr:    "", // Empty when query fails
-				TaskType:      "restore",
+				TaskType:      BackupTaskTypeRestore,
 				Status:        BackupStatusInited,
 				RetryCount:    0,
 				MaxRetries:    3,
@@ -1458,7 +1434,7 @@ func (bm *BackupMonitor) addRestoreTasks(ctx context.Context, spaceKey string, p
 			PartitionID:   partition.PartitionID,
 			NodeID:        partition.NodeID,
 			PSNodeAddr:    server.RpcAddr(),
-			TaskType:      "restore",
+			TaskType:      BackupTaskTypeRestore,
 			Status:        BackupStatusInited,
 			RetryCount:    0,
 			MaxRetries:    3,
@@ -1501,11 +1477,11 @@ func (bm *BackupMonitor) dispatchTasks(tasks []*PartitionBackupOrRestoreTask) {
 				}
 			}()
 			var err error
-			if task.TaskType == "backup" {
-				task.BackupRequest.Command = "backup"
+			if task.TaskType == BackupTaskTypeBackup {
+				task.BackupRequest.Command = BackupCommandBackup
 				err = bm.processBackupTask(task)
 			} else {
-				task.BackupRequest.Command = "restore"
+				task.BackupRequest.Command = BackupCommandRestore
 				err = bm.processRestoreTask(task)
 			}
 			if err != nil {
@@ -1844,7 +1820,7 @@ func (bm *BackupMonitor) GetRestoreProgress(spaceKey string) *entity.BackupProgr
 	tasks, exists := bm.tasks[spaceKey]
 	if !exists || len(tasks) == 0 {
 		return &entity.BackupProgressResponse{
-			Status:         "not_found",
+			Status:         BackupStatusStringNotFound,
 			TotalTasks:     0,
 			CompletedTasks: 0,
 			SuccessRatio:   0.0,
@@ -1858,7 +1834,7 @@ func (bm *BackupMonitor) GetRestoreProgress(spaceKey string) *entity.BackupProgr
 
 	for _, task := range tasks {
 		// Skip non-restore tasks
-		if task.TaskType != "restore" {
+		if task.TaskType != BackupTaskTypeRestore {
 			continue
 		}
 
@@ -1887,11 +1863,11 @@ func (bm *BackupMonitor) GetRestoreProgress(spaceKey string) *entity.BackupProgr
 		successRatio = float64(completedTasks) / float64(totalTasks)
 	}
 
-	status := "running"
+	status := BackupStatusStringRunning
 	if completedTasks == totalTasks {
-		status = "completed"
+		status = BackupStatusStringCompleted
 	} else if failedTasks > 0 && runningTasks == 0 {
-		status = "failed"
+		status = BackupStatusStringFailed
 	}
 
 	return &entity.BackupProgressResponse{
@@ -1979,7 +1955,7 @@ func (b *BackupManager) createSnapshot(ctx context.Context, req *entity.BackupOr
 	spaceName := req.Space
 
 	// Check if current spaceKey still has tasks, if exists it means the previous backup version is still being processed, return error directly
-	spaceKey := fmt.Sprintf("%s-%s", databaseName, spaceName)
+	spaceKey := buildSpaceKey(databaseName, spaceName)
 	b.backupMonitor.mu.RLock()
 	tasks, exists := b.backupMonitor.tasks[spaceKey]
 	b.backupMonitor.mu.RUnlock()
@@ -2035,7 +2011,7 @@ func (b *BackupManager) createSnapshot(ctx context.Context, req *entity.BackupOr
 		SpaceName:   spaceName,
 		VersionID:   versionID,
 		BackupID:    req.BackupID, // Set BackupID
-		Description: "backup",
+		Description: BackupDescriptionBackup,
 		Tags:        make(map[string]string),
 		Partitions:  partitions,
 	})
@@ -2047,13 +2023,13 @@ func (b *BackupManager) createSnapshot(ctx context.Context, req *entity.BackupOr
 	backupRequest := &entity.BackupOrRestoreRequest{
 		Database:  databaseName,
 		Space:     spaceName,
-		Command:   "backup",
+		Command:   BackupCommandBackup,
 		VersionID: versionID,
 		BackupID:  req.BackupID,
 		S3Param:   req.S3Param,
 	}
 
-	err = b.backupMonitor.addVersionTask(ctx, version, "backup", backupRequest)
+	err = b.backupMonitor.addVersionTask(ctx, version, BackupTaskTypeBackup, backupRequest)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -2110,13 +2086,13 @@ func (b *BackupManager) restoreSnapshot(ctx context.Context, dbService *DBServic
 	}
 
 	// Construct spaceKey (format: dbName-spaceName)
-	spaceKey := fmt.Sprintf("%s-%s", databaseName, spaceName)
+	spaceKey := buildSpaceKey(databaseName, spaceName)
 
 	// Construct backup request
 	backupRequest := &entity.BackupOrRestoreRequest{
 		Database:          databaseName,
 		Space:             spaceName,
-		Command:           "restore",
+		Command:           BackupCommandRestore,
 		VersionID:         versionID,
 		BackupID:          req.BackupID,
 		SourceClusterName: req.SourceClusterName,
@@ -2152,7 +2128,7 @@ func (b *BackupManager) resolvePartitions(ctx context.Context, databaseName,
 		return nil, fmt.Errorf("space %s/%s not found", databaseName, spaceName)
 	}
 
-	spaceKey := fmt.Sprintf("%s-%s", databaseName, spaceName)
+	spaceKey := buildSpaceKey(databaseName, spaceName)
 	b.muS3PartitionMap.RLock()
 	s3PartitionMap, hasMapping := b.s3PartitionMap[spaceKey]
 	b.muS3PartitionMap.RUnlock()
@@ -2350,7 +2326,7 @@ func (b *BackupManager) restoreSchema(ctx context.Context,
 	}
 
 	// Establish mapping relationship: new partition ID -> S3 partition ID
-	spaceKey := fmt.Sprintf("%s-%s", dbName, spaceName)
+	spaceKey := buildSpaceKey(dbName, spaceName)
 	if len(s3PartitionIDs) == len(space.Partitions) {
 		s3PartitionMap := make(map[entity.PartitionID]entity.PartitionID)
 		for i, newPartition := range space.Partitions {

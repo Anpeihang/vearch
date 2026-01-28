@@ -825,14 +825,7 @@ func (bh *BackupHandler) downloadDirectory(ctx context.Context, minioClient *min
 }
 
 func (bh *BackupHandler) restore(ctx context.Context, pid uint32, backup *entity.BackupSpaceRequest, minioClient *minio.Client, dbName, spaceName string, path string) {
-	sourceClusterName := backup.SourceClusterName
-	if sourceClusterName == "" {
-		sourceClusterName = config.Conf().Global.Name
-		if sourceClusterName == "" {
-			sourceClusterName = "default-cluster"
-		}
-	}
-	pathBuilder := NewS3PathBuilder(sourceClusterName)
+	pathBuilder := NewS3PathBuilder(config.Conf().Global.Name)
 
 	engine := bh.server.GetPartition(pid).GetEngine()
 	if engine == nil {
@@ -1099,12 +1092,7 @@ type BackupStatusHandler struct {
 func (bsh *BackupStatusHandler) Execute(ctx context.Context, req *vearchpb.PartitionData, reply *vearchpb.PartitionData) (err error) {
 	reply.Err = &vearchpb.Error{Code: vearchpb.ErrorEnum_SUCCESS}
 
-	type BackupStatusQuery struct {
-		SpaceKey string `json:"space_key"`
-		BackupID string `json:"backup_id"`
-	}
-
-	query := new(BackupStatusQuery)
+	query := new(entity.BackupStatusQuery)
 	if err := json.Unmarshal(req.Data, query); err != nil {
 		log.Error("Failed to unmarshal backup status query: %v", err)
 		return vearchpb.NewError(vearchpb.ErrorEnum_RPC_PARAM_ERROR, err)
@@ -1125,13 +1113,7 @@ func (bsh *BackupStatusHandler) Execute(ctx context.Context, req *vearchpb.Parti
 	log.Info("BackupTaskStatus result: spaceKey=%s, backupID=%s, partitionID=%d, status=%d, exists=%v, errorMsg=%s",
 		query.SpaceKey, query.BackupID, pid, status, exists, errorMsg)
 
-	type BackupStatusResponse struct {
-		Exists       bool   `json:"exists"`
-		Status       int    `json:"status"` // 0=running, 1=completed, 2=failed
-		ErrorMessage string `json:"error_message"`
-	}
-
-	response := &BackupStatusResponse{
+	response := &entity.BackupStatusResponse{
 		Exists:       exists,
 		Status:       status,
 		ErrorMessage: errorMsg,
@@ -1155,12 +1137,7 @@ type DeleteBackupHandler struct {
 func (dbh *DeleteBackupHandler) Execute(ctx context.Context, req *vearchpb.PartitionData, reply *vearchpb.PartitionData) (err error) {
 	reply.Err = &vearchpb.Error{Code: vearchpb.ErrorEnum_SUCCESS}
 
-	type DeleteBackupVersionRequest struct {
-		SpaceKey  string `json:"space_key"`
-		VersionID string `json:"version_id"`
-	}
-
-	request := new(DeleteBackupVersionRequest)
+	request := new(entity.DeleteBackupVersionRequest)
 	if err := json.Unmarshal(req.Data, request); err != nil {
 		log.Error("Failed to unmarshal delete backup request: %v", err)
 		return vearchpb.NewError(vearchpb.ErrorEnum_RPC_PARAM_ERROR, err)
@@ -1259,7 +1236,9 @@ func (bh *IncrementBackupHandler) Execute(ctx context.Context, req *vearchpb.Par
 		if sourceClusterName == "" {
 			sourceClusterName = config.Conf().Global.Name
 			if sourceClusterName == "" {
-				sourceClusterName = "default-cluster"
+				log.Error("Cluster name is required for restore operation but is empty")
+				return vearchpb.NewError(vearchpb.ErrorEnum_PARAM_ERROR,
+					fmt.Errorf("cluster name is required for restore operation but is empty"))
 			}
 		}
 		if err := backupMgr.StartPartitionRestore(spaceKey, backup.BackupID, backup.VersionID, pid, s3PartitionID, sourceClusterName); err != nil {
@@ -1285,7 +1264,8 @@ func (bh *IncrementBackupHandler) initBackupManagerFromRequest(backup *entity.Ba
 
 	clusterName := config.Conf().Global.Name
 	if clusterName == "" {
-		clusterName = "default-cluster"
+		log.Error("Cluster name is required for backup operation but is empty")
+		return nil, fmt.Errorf("cluster name is required for backup operation but is empty")
 	}
 	getPartitionFunc := func(id entity.PartitionID) backuppkg.PartitionStore {
 		return bh.server.GetPartition(id)

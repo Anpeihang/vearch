@@ -111,6 +111,7 @@ func OperateBackupOrRestore(addr string, backup *entity.BackupOrRestoreRequest, 
 	if err != nil {
 		return err
 	}
+
 	args := &vearchpb.PartitionData{PartitionID: pid, Data: value, Type: vearchpb.OpType_CREATE}
 	reply := new(vearchpb.PartitionData)
 	err = Execute(addr, IncrementBackupHandler, args, reply)
@@ -122,27 +123,18 @@ func OperateBackupOrRestore(addr string, backup *entity.BackupOrRestoreRequest, 
 	return nil
 }
 
-// BackupStatusResponse backup status response
-type BackupStatusResponse struct {
-	Exists       bool   `json:"exists"`
-	Status       int    `json:"status"` // 0=running, 1=completed, 2=failed
-	ErrorMessage string `json:"error_message"`
-}
-
 // GetBackupStatus queries partition backup status
-func GetBackupStatus(addr string, spaceKey string, backupID string, pid entity.PartitionID) (*BackupStatusResponse, error) {
-	type BackupStatusQuery struct {
-		SpaceKey string `json:"space_key"`
-		BackupID string `json:"backup_id"`
-	}
-	query := &BackupStatusQuery{
+func GetBackupStatus(addr string, spaceKey string, backupID string, pid entity.PartitionID) (*entity.BackupStatusResponse, error) {
+	query := &entity.BackupStatusQuery{
 		SpaceKey: spaceKey,
 		BackupID: backupID,
 	}
+
 	value, err := vjson.Marshal(query)
 	if err != nil {
 		return nil, err
 	}
+
 	log.Info("GetBackupStatus RPC call: addr=%s, spaceKey=%s, backupID=%s, pid=%d", addr, spaceKey, backupID, pid)
 	args := &vearchpb.PartitionData{PartitionID: pid, Data: value, Type: vearchpb.OpType_GET}
 	reply := new(vearchpb.PartitionData)
@@ -151,35 +143,34 @@ func GetBackupStatus(addr string, spaceKey string, backupID string, pid entity.P
 		log.Error("GetBackupStatus RPC error: %v", err)
 		return nil, err
 	}
+
 	if reply.Err.Code != vearchpb.ErrorEnum_SUCCESS {
 		log.Error("GetBackupStatus RPC reply error code: %v", reply.Err.Code)
 		return nil, vearchpb.NewError(reply.Err.Code, nil)
 	}
-	response := &BackupStatusResponse{}
+
+	response := &entity.BackupStatusResponse{}
 	if err := vjson.Unmarshal(reply.Data, response); err != nil {
 		log.Error("GetBackupStatus unmarshal error: %v", err)
 		return nil, err
 	}
+
 	log.Info("GetBackupStatus RPC success: exists=%v, status=%d, errorMsg=%s", response.Exists, response.Status, response.ErrorMessage)
 	return response, nil
 }
 
-// DeleteBackupVersionRequest delete backup version request
-type DeleteBackupVersionRequest struct {
-	SpaceKey  string `json:"space_key"`
-	VersionID string `json:"version_id"`
-}
-
 // DeleteBackupVersion deletes backup version (calls PS side to delete reference count)
 func DeleteBackupVersion(addr string, spaceKey string, versionID string, pid entity.PartitionID) error {
-	request := &DeleteBackupVersionRequest{
+	request := &entity.DeleteBackupVersionRequest{
 		SpaceKey:  spaceKey,
 		VersionID: versionID,
 	}
+
 	value, err := vjson.Marshal(request)
 	if err != nil {
 		return err
 	}
+
 	log.Info("DeleteBackupVersion RPC call: addr=%s, spaceKey=%s, versionID=%s, pid=%d", addr, spaceKey, versionID, pid)
 	args := &vearchpb.PartitionData{PartitionID: pid, Data: value, Type: vearchpb.OpType_DELETE}
 	reply := new(vearchpb.PartitionData)
@@ -188,10 +179,12 @@ func DeleteBackupVersion(addr string, spaceKey string, versionID string, pid ent
 		log.Error("DeleteBackupVersion RPC error: %v", err)
 		return err
 	}
+
 	if reply.Err.Code != vearchpb.ErrorEnum_SUCCESS {
 		log.Error("DeleteBackupVersion RPC reply error code: %v", reply.Err.Code)
 		return vearchpb.NewError(reply.Err.Code, nil)
 	}
+
 	log.Info("DeleteBackupVersion RPC success: spaceKey=%s, versionID=%s", spaceKey, versionID)
 	return nil
 }

@@ -708,11 +708,11 @@ class TestClusterBackup:
         for space_name in self.space_names:
             waiting_index_finish(total, space_name=space_name)
         
-        # 恢复后索引虽然数量达到了，但可能还在构建中，需要额外等待让索引完全稳定
+        
         logger.info("Waiting for indexes to stabilize after restore...")
         time.sleep(20)
         
-        # 再次确认索引状态，确保所有 partition 的索引都已就绪
+
         logger.info("Double-checking index status before verification...")
         for space_name in self.space_names:
             url = router_url + "/dbs/" + self.db_name + "/spaces/" + space_name
@@ -725,7 +725,7 @@ class TestClusterBackup:
                 if total_indexed < total:
                     logger.warning(f"Space {space_name} index count ({total_indexed}) is less than expected ({total}), waiting more...")
                     waiting_index_finish(total, space_name=space_name, timewait=3)
-                    time.sleep(10)  # 额外等待确保索引稳定
+                    time.sleep(10)  
 
         logger.info("Step 5: Verifying restored data")
         for space_name in self.space_names:

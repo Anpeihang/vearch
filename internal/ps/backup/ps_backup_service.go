@@ -257,9 +257,6 @@ func (s *PSShardManager) startShardRestore(
 	sourceClusterName := task.sourceClusterName
 	if sourceClusterName == "" {
 		sourceClusterName = config.Conf().Global.Name
-		if sourceClusterName == "" {
-			sourceClusterName = "default-cluster"
-		}
 	}
 
 	err = s.restoreShardSnapshot(context.Background(), filePath, spaceKey, backupID, versionID, partitionID, s3PartitionID, sourceClusterName)

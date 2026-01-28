@@ -129,57 +129,6 @@ type SpaceInfo struct {
 	Errors        []string         `json:"errors,omitempty"`
 }
 
-type BackupSpaceRequest struct {
-	Command           string      `json:"command,omitempty"`
-	BackupID          int         `json:"backup_id,omitempty"`
-	VersionID         string      `json:"version_id,omitempty"`
-	BackupType        string      `json:"backup_type,omitempty"` // Backup type: "full" for full backup, "incremental" for incremental backup (default: full)
-	Part              PartitionID `json:"part"`
-	SourceClusterName string      `json:"source_cluster_name,omitempty"` // Source cluster name (for cross-cluster restore)
-	S3Param           struct {
-		Region     string `json:"region"`
-		BucketName string `json:"bucket_name"`
-		EndPoint   string `json:"endpoint"`
-		AccessKey  string `json:"access_key"`
-		SecretKey  string `json:"secret_key"`
-		UseSSL     bool   `json:"use_ssl"`
-	} `json:"s3_param,omitempty"`
-}
-
-type BackupOrRestoreRequest struct {
-	Database          string `json:"database"`
-	Space             string `json:"space"`
-	BackupID          string `json:"backup_id"`
-	VersionID         string `json:"version_id"`
-	Command           string `json:"command,omitempty"`
-	BackupType        string `json:"backup_type,omitempty"`         // Backup type: "full" for full backup, "incremental" for incremental backup (default: incremental)
-	S3PartitionID     uint32 `json:"s3_partition_id,omitempty"`     // Partition ID on S3 (used during restore when new partition ID differs from S3 partition ID)
-	SourceClusterName string `json:"source_cluster_name,omitempty"` // Source cluster name (for cross-cluster restore)
-	S3Param           struct {
-		Region     string `json:"region"`
-		BucketName string `json:"bucket_name"`
-		EndPoint   string `json:"endpoint"`
-		AccessKey  string `json:"access_key"`
-		SecretKey  string `json:"secret_key"`
-		UseSSL     bool   `json:"use_ssl"`
-	} `json:"s3_param,omitempty"`
-}
-
-type BackupSpaceResponse struct {
-	BackupID  int    `json:"backup_id,omitempty"`
-	BackupIDs []int  `json:"backup_ids,omitempty"`
-	VersionID string `json:"version_id,omitempty"`
-}
-
-// BackupProgressResponse backup progress response
-type BackupProgressResponse struct {
-	TotalTasks     int     `json:"total_tasks,omitempty"`     // Total number of tasks
-	CompletedTasks int     `json:"completed_tasks,omitempty"` // Number of completed tasks
-	SuccessRatio   float64 `json:"success_ratio,omitempty"`   // Success ratio of partitions (0.0-1.0)
-	Status         string  `json:"status,omitempty"`          // Backup status: completed, failed, running
-	VersionID      string  `json:"version_id,omitempty"`      // Version ID
-}
-
 type SpaceProperties struct {
 	FieldType  vearchpb.FieldType   `json:"field_type"`
 	Type       string               `json:"type"`

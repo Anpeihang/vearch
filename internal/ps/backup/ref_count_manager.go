@@ -14,6 +14,11 @@ import (
 	"github.com/vearch/vearch/v3/internal/pkg/log"
 )
 
+const (
+	MetadataDirName  = "metadata"
+	RefCountFileName = "file_refcount.json"
+)
+
 // FileRefCount file reference count structure
 type FileRefCount struct {
 	CRC32         string    `json:"crc32"`
@@ -62,7 +67,7 @@ func NewRefCountManager(minioClient *minio.Client, bucketName string, clusterNam
 // If spaceKey is not empty: clusterName/metadata/{dbName}/{spaceName}/file_refcount.json
 func (rcm *RefCountManager) buildMetadataPath(clusterName string, spaceKey string) string {
 	if spaceKey == "" {
-		return filepath.Join(clusterName, "metadata", "file_refcount.json")
+		return filepath.Join(clusterName, MetadataDirName, RefCountFileName)
 	}
 
 	// Subdivided by database/table: clusterName/metadata/{dbName}/{spaceName}/file_refcount.json
@@ -70,11 +75,11 @@ func (rcm *RefCountManager) buildMetadataPath(clusterName string, spaceKey strin
 	if len(parts) >= 2 {
 		dbName := parts[0]
 		spaceName := parts[1]
-		return filepath.Join(clusterName, "metadata", dbName, spaceName, "file_refcount.json")
+		return filepath.Join(clusterName, MetadataDirName, dbName, spaceName, RefCountFileName)
 	}
 
 	log.Warn("Invalid spaceKey format: %s, falling back to cluster-level storage", spaceKey)
-	return filepath.Join(clusterName, "metadata", "file_refcount.json")
+	return filepath.Join(clusterName, MetadataDirName, RefCountFileName)
 }
 
 // GetMetadataPath gets current metadata path
