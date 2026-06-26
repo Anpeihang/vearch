@@ -15,7 +15,7 @@ The following table shows Vearch versions and recommended PyVearch versions:
 
 | Vearch version | Recommended PyVearch version |
 |:--------------:|:----------------------------:|
-|      3.5.X     |             3.5.5            |
+|      3.5.X     |             3.5.6            |
 
 ## Installation
 
@@ -100,7 +100,7 @@ ret = vc.query("database_test", "book_info", document_ids)
 print(ret.documents)
 
 # by filter
-from vearch.filter import Filter, Condition, FieldValue, Conditions
+from vearch.filter import Filter, Condition, FieldValue
 
 conditons = [
     Condition(operator=">", fv=FieldValue(field="book_num", value=0)),
